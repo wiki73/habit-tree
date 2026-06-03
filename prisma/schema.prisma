@@ -1,0 +1,30 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Привычка (теперь это просто жесткий тип: 'CHARGING', 'SPORT', 'READING')
+model Habit {
+  id          String     @id @default(cuid())
+  title       String     // Название (Зарядка, Спорт, Почитать)
+  slug        String     @unique // Уникальный маркер для поиска ('charging', 'sport', 'reading')
+  createdAt   DateTime   @default(now())
+  logs        HabitLog[] 
+}
+
+model HabitLog {
+  id            String   @id @default(cuid())
+  habitId       String
+  habit         Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date          String  
+
+  animationType String // Случайный человечек, который заспавнился при клике (например: 'PUSHUPS', 'SALAD', 'SHOWER')   
+  createdAt     DateTime @default(now())
+
+  // Нельзя выполнить одну и ту же привычку дважды за один день
+  @@unique([habitId, date])
+}
