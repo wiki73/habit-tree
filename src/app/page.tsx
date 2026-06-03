@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { ANIMATIONS } from "@/lib/animations";
 import { getFactoryGrid30Days, toggleHabitInDay } from "./actions";
 
