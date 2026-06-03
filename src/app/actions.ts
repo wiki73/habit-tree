@@ -70,3 +70,22 @@ export async function getFactoryGrid30Days() {
     };
   });
 }
+
+
+
+
+export async function createHabit(title: string, slug: string) {
+  if (!title.trim() || !slug.trim()) return
+
+  const existing = await db.habit.findUnique({ where: { slug } })
+  if (existing) return
+
+  await db.habit.create({
+    data: {
+      title,
+      slug,
+    },
+  })
+
+  revalidatePath('/')
+}

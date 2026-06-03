@@ -1,14 +1,30 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 import { ANIMATIONS } from "@/lib/animations";
-import { getFactoryGrid30Days, toggleHabitInDay } from "./actions";
+import { getFactoryGrid30Days, toggleHabitInDay, createHabit } from "./actions";
 
 export default async function Home() {
   const grid30Days = await getFactoryGrid30Days();
 
+  // Функция-обработчик для формы добавления новой привычки
+  async function handleCreateHabit(formData: FormData) {
+    "use server";
+    const title = formData.get("title") as string;
+    if (!title) return;
+
+    // Автоматически генерируем уникальный slug из названия (транслит или просто очистка)
+    const slug = title
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\sа-яё]/gi, "") // удаляем спецсимволы
+      .replace(/\s+/g, "-"); // заменяем пробелы на дефисы
+
+    await createHabit(title, slug);
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="max-w-7xl mx-auto space-y-10">
         {/* Шапка */}
         <header className="text-center space-y-2">
           <h1 className="text-4xl font-black tracking-wider bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-500 bg-clip-text text-transparent">
@@ -20,8 +36,32 @@ export default async function Home() {
           </p>
         </header>
 
+        {/* Добавление привычек */}
+        <section className="bg-slate-900 border-2 border-slate-800 rounded-2xl p-6 shadow-xl max-w-xl mx-auto">
+          <h2 className="text-lg font-bold text-cyan-400 mb-3 flex items-center gap-2">
+            🛠️ Добавление привычек
+          </h2>
+          <form action={handleCreateHabit} className="flex gap-3">
+            <input
+              type="text"
+              name="title"
+              required
+              maxLength={25}
+              placeholder="Например: 💧 Выпить воды (незабудьте смайлик😊)"
+              className="flex-grow bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+            />
+            <button
+              type="submit"
+              className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition duration-200"
+            >
+              + Добавить
+            </button>
+          </form>
+          
+        </section>
+
         {/* Главная Сетка 30 Дней */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {grid30Days.map((day, index) => (
             <div
               key={day.date}
@@ -38,9 +78,8 @@ export default async function Home() {
               </div>
 
               {/* Внутреннее пространство комнаты-дня */}
-              <div className="flex-grow flex flex-col justify-center space-y-2.5 my-2">
+              <div className="grid grid-cols-2 gap-1 space-y-0.5 my-2">
                 {day.habits.map((habit) => {
-                  // Если привычка выполнена, ищем анимацию в конфиге
                   const animInfo = habit.isCompleted
                     ? ANIMATIONS.find((a) => a.id === habit.animationId)
                     : null;
@@ -52,7 +91,7 @@ export default async function Home() {
                     >
                       {habit.isCompleted && animInfo ? (
                         <div
-                          className="flex items-center gap-2 bg-indigo-950/40 border border-indigo-500/30 w-full px-3 py-1.5 rounded-xl cursor-pointer hover:bg-red-950/30 hover:border-red-500/30 transition group relative"
+                          className="flex items-center gap-2 bg-indigo-950/40 border border-indigo-500/30 w-full px-1 py-1.5 rounded-xl cursor-pointer hover:bg-red-950/30 hover:border-red-500/30 transition group relative"
                           title="Нажмите, чтобы отменить выполнение"
                         >
                           <span
@@ -60,19 +99,12 @@ export default async function Home() {
                           >
                             {animInfo.icon}
                           </span>
-
-                          {/* Текст привычки: скрывается при наведении строго на ЭТУ строку */}
-                          <span className="text-[11px] text-indigo-300 font-medium group-hover:hidden z-10 truncate">
-                            {habit.title.split(" ")[1]}{" "}
-                            {animInfo.label.toLowerCase()}!
+                          <span className="text-[10px] text-indigo-300 font-medium group-hover:hidden z-10 truncate">
+                            {habit.title} {animInfo.label.toLowerCase()}!
                           </span>
-
-                          {/* Текст отмены: появляется строго при наведении на ЭТУ строку */}
                           <span className="text-[11px] text-red-400 font-bold hidden group-hover:inline z-10">
                             Убрать Х
                           </span>
-
-                          {/* Скрытая форма: теперь она растягивается строго ВНУТРИ этой строки (inset-0 + relative выше) */}
                           <form
                             action={async () => {
                               "use server";
@@ -87,7 +119,6 @@ export default async function Home() {
                           </form>
                         </div>
                       ) : (
-                        // Если привычка не выполнена — показываем кнопку выполнения
                         <form
                           action={async () => {
                             "use server";
@@ -97,9 +128,9 @@ export default async function Home() {
                         >
                           <button
                             type="submit"
-                            className="w-full text-left px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-500 transition duration-200"
+                            className="w-full h-full py-3 cursor-pointer text-left text-xs px-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-500 transition duration-200 truncate"
                           >
-                            + Выполнить {habit.title}
+                            + {habit.title}
                           </button>
                         </form>
                       )}
@@ -110,7 +141,8 @@ export default async function Home() {
 
               {/* Индикатор заполненности комнаты */}
               <div className="text-[9px] text-right text-slate-600 font-mono mt-2">
-                Заселено: {day.habits.filter((h) => h.isCompleted).length} / 3
+                Заселено: {day.habits.filter((h) => h.isCompleted).length} /{" "}
+                {day.habits.length}
               </div>
             </div>
           ))}
