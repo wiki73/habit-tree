@@ -9,13 +9,30 @@ async function main() {
   ]
 
   for (const habit of defaultHabits) {
-    await prisma.habit.upsert({
+    const createdHabit = await prisma.habit.upsert({
       where: { slug: habit.slug },
-      update: {},
-      create: habit,
+      update: { title: habit.title },
+      create: {
+        title: habit.title,
+        slug: habit.slug,
+        plans: {
+          create: [{ repeatType: 'DAILY' }],
+        },
+      },
     })
+
+    const plansCount = await prisma.habitPlan.count({ where: { habitId: createdHabit.id } })
+    if (plansCount === 0) {
+      await prisma.habitPlan.create({
+        data: {
+          habitId: createdHabit.id,
+          repeatType: 'DAILY',
+        },
+      })
+    }
   }
-  console.log('Базовые привычки успешно созданы!')
+
+  console.log('Базовые привычки и планы успешно созданы!')
 }
 
 main()

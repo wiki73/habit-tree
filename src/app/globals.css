@@ -24,3 +24,21 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Roly-poly wobble animation for completed day tiles */
+@keyframes wobble {
+  0% { transform: rotate(-1deg); }
+  50% { transform: rotate(1deg); }
+  100% { transform: rotate(-1deg); }
+}
+
+.animate-wobble {
+  animation: wobble 0.5s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Reverse direction for alternating tiles */
+.animate-wobble-reverse {
+  animation-direction: reverse;
+}

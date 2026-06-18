@@ -4,27 +4,69 @@ import { db } from "@/lib/db";
 import { getRandomAnimationId } from "@/lib/animations";
 import { revalidatePath } from "next/cache";
 
-// Клик по кнопке привычки внутри ячейки дня
+function toDateOnlyString(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildDateAtUtc(date: string) {
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
+function isHabitActiveOnDay(habit: { plans: { startDate: Date; endDate?: Date | null }[] }, dateString: string) {
+  if (!habit.plans?.length) return true;
+
+  const currentDate = buildDateAtUtc(dateString);
+
+  return habit.plans.some((plan) => {
+    const planStart = buildDateAtUtc(toDateOnlyString(plan.startDate));
+    const planEnd = plan.endDate ? buildDateAtUtc(toDateOnlyString(plan.endDate)) : null;
+    return currentDate >= planStart && (planEnd === null || currentDate <= planEnd);
+  });
+}
+
+function getPlanLabel(habit: { plans: { durationDays?: number | null }[] }) {
+  const plan = habit.plans?.[0];
+  if (!plan) return "∞";
+  if (plan.durationDays && plan.durationDays > 0) return `${plan.durationDays}d`;
+  return "∞";
+}
+
+function buildRecentDayStrings(daysCount: number) {
+   return Array.from({ length: daysCount }).map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
+async function ensureDaysExist(dateStrings: string[]) {
+  const payload = dateStrings.map((date) => ({ date: buildDateAtUtc(date) }));
+  await db.day.createMany({ data: payload, skipDuplicates: true });
+}
+
 export async function toggleHabitInDay(habitSlug: string, dateStr: string) {
-  // Находим саму привычку
   const habit = await db.habit.findUnique({ where: { slug: habitSlug } });
   if (!habit) return;
 
-  // Проверяем, отмечена ли она уже в этот день
-  const existingLog = await db.habitLog.findUnique({
-    where: { habitId_date: { habitId: habit.id, date: dateStr } },
+  const day = await db.day.upsert({
+    where: { date: buildDateAtUtc(dateStr) },
+    update: {},
+    create: { date: buildDateAtUtc(dateStr) },
   });
 
-  if (existingLog) {
-    // Если уже была — удаляем (отменяем выполнение)
-    await db.habitLog.delete({ where: { id: existingLog.id } });
+  const existingTask = await db.dayTask.findUnique({
+    where: { dayId_habitId: { dayId: day.id, habitId: habit.id } },
+  });
+
+  if (existingTask) {
+    await db.dayTask.delete({ where: { id: existingTask.id } });
   } else {
-    // Если выполняем впервые — генерируем СЛУЧАЙНОГО челика!
-    await db.habitLog.create({
+    await db.dayTask.create({
       data: {
+        dayId: day.id,
         habitId: habit.id,
-        date: dateStr,
-        animationType: getRandomAnimationId(), // Рандомный ID анимации
+        animationType: getRandomAnimationId(),
+        completedAt: new Date(),
       },
     });
   }
@@ -32,35 +74,65 @@ export async function toggleHabitInDay(habitSlug: string, dateStr: string) {
   revalidatePath("/");
 }
 
-// Собираем полную сетку 30 дней со всеми кнопками и заспавненными челиками
-export async function getFactoryGrid30Days() {
-  // Получаем список 30 дней (от старых к сегодня)
-  const days = Array.from({ length: 30 })
-    .map((_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return d.toISOString().split("T")[0];
-    }).reverse();
+export async function createHabit(title: string, slug: string, durationDaysParam: string) {
+  if (!title.trim() || !slug.trim()) return;
 
-  // Достаем все привычки и все логи за эти 30 дней
-  const allHabits = await db.habit.findMany();
-  const allLogs = await db.habitLog.findMany({
-    where: { date: { in: days } },
-    include: { habit: true },
+  const existing = await db.habit.findUnique({ where: { slug } });
+  if (existing) return;
+
+  const durationDays = Number(durationDaysParam) || 0;
+  const today = buildDateAtUtc(new Date().toISOString().slice(0, 10));
+  const endDate = durationDays > 0
+    ? buildDateAtUtc(new Date(today.getTime() + (durationDays - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
+    : null;
+
+  await db.habit.create({
+    data: {
+      title,
+      slug,
+      plans: {
+        create: [
+          {
+            startDate: today,
+            durationDays: durationDays > 0 ? durationDays : null,
+            endDate,
+            repeatType: "DAILY",
+          },
+        ],
+      },
+    },
   });
 
-  // Для каждого дня собираем состояние его "комнаты"
-  return days.map((dateStr) => {
-    const logsThisDay = allLogs.filter((log) => log.date === dateStr);
+  revalidatePath("/");
+}
 
-    // Массив привычек с их статусом для этого конкретного дня
-    const habitsState = allHabits.map((habit) => {
-      const logForThisHabit = logsThisDay.find((l) => l.habitId === habit.id);
+export async function getFactoryGrid30Days() {
+  const days = buildRecentDayStrings(30);
+  await ensureDaysExist(days);
+
+  const allHabits = await db.habit.findMany({ include: { plans: true } });
+  const allTasks = await db.dayTask.findMany({
+    where: { day: { date: { in: days.map(buildDateAtUtc) } } },
+    include: { habit: true, day: true },
+  });
+
+  const taskMap = new Map<string, typeof allTasks[number]>();
+  allTasks.forEach((task) => {
+    const dateKey = toDateOnlyString(task.day.date);
+    taskMap.set(`${dateKey}:${task.habitId}`, task);
+  });
+
+  return days.map((dateStr) => {
+    const activeHabits = allHabits.filter((habit) => isHabitActiveOnDay(habit, dateStr));
+
+    const habitsState = activeHabits.map((habit) => {
+      const task = taskMap.get(`${dateStr}:${habit.id}`);
       return {
         title: habit.title,
         slug: habit.slug,
-        isCompleted: !!logForThisHabit,
-        animationId: logForThisHabit ? logForThisHabit.animationType : null,
+        isCompleted: !!task,
+        animationId: task?.animationType ?? null,
+        planLabel: getPlanLabel(habit),
       };
     });
 
@@ -71,21 +143,37 @@ export async function getFactoryGrid30Days() {
   });
 }
 
+export async function getOverviewStats(daysCount = 30) {
+  const days = buildRecentDayStrings(daysCount);
+  const allHabits = await db.habit.findMany({ include: { plans: true } });
+  const allTasks = await db.dayTask.findMany({
+    where: { day: { date: { in: days.map(buildDateAtUtc) } } },
+    include: { habit: true, day: true },
+  });
 
+  const completedTasks = allTasks.length;
 
+  const activeHabitsByDay = days.map((date) =>
+    allHabits.filter((habit) => isHabitActiveOnDay(habit, date)).length,
+  );
 
-export async function createHabit(title: string, slug: string) {
-  if (!title.trim() || !slug.trim()) return
+  const totalPossibleTasks = activeHabitsByDay.reduce((sum, count) => sum + count, 0);
+  const activeDays = activeHabitsByDay.filter((count) => count > 0).length;
 
-  const existing = await db.habit.findUnique({ where: { slug } })
-  if (existing) return
+  const habits = allHabits.map((habit) => ({
+    title: habit.title,
+    slug: habit.slug,
+    planLabel: getPlanLabel(habit),
+    completedTasks: allTasks.filter((task) => task.habitId === habit.id).length,
+  }));
 
-  await db.habit.create({
-    data: {
-      title,
-      slug,
-    },
-  })
-
-  revalidatePath('/')
+  return {
+    totalDays: daysCount,
+    totalHabits: allHabits.length,
+    activeDays,
+    totalPossibleTasks,
+    completedTasks,
+    completionRate: totalPossibleTasks ? Math.round((completedTasks / totalPossibleTasks) * 100) : 0,
+    habits,
+  };
 }

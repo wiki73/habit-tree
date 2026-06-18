@@ -7,24 +7,53 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// Привычка (теперь это просто жесткий тип: 'CHARGING', 'SPORT', 'READING')
+// Шаблон привычки
 model Habit {
-  id          String     @id @default(cuid())
-  title       String     // Название (Зарядка, Спорт, Почитать)
-  slug        String     @unique // Уникальный маркер для поиска ('charging', 'sport', 'reading')
-  createdAt   DateTime   @default(now())
-  logs        HabitLog[] 
+  id        String      @id @default(cuid())
+  title     String
+  slug      String      @unique
+  createdAt DateTime    @default(now())
+  plans     HabitPlan[]
+  tasks     DayTask[]
 }
 
-model HabitLog {
-  id            String   @id @default(cuid())
-  habitId       String
-  habit         Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
-  date          String  
+// День, в котором могут быть задачи привычек
+model Day {
+  id        String    @id @default(cuid())
+  date      DateTime  @unique @db.Date
+  tasks     DayTask[]
+  createdAt DateTime  @default(now())
+}
 
-  animationType String // Случайный человечек, который заспавнился при клике (например: 'PUSHUPS', 'SALAD', 'SHOWER')   
+// Задача привычки в конкретном дне
+model DayTask {
+  id            String   @id @default(cuid())
+  dayId         String
+  habitId       String
+  day           Day      @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  habit         Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  isDone        Boolean  @default(true)
+  animationType String?
+  completedAt   DateTime?
   createdAt     DateTime @default(now())
 
-  // Нельзя выполнить одну и ту же привычку дважды за один день
-  @@unique([habitId, date])
+  @@unique([dayId, habitId])
+}
+
+// План привычки — позволяет ограничить задачу 7, 30 днями или сделать её вечной
+model HabitPlan {
+  id           String     @id @default(cuid())
+  habitId      String
+  habit        Habit      @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  startDate    DateTime   @default(now()) @db.Date
+  endDate      DateTime?  @db.Date
+  repeatType   RepeatType @default(DAILY)
+  durationDays Int?
+  createdAt    DateTime   @default(now())
+}
+
+enum RepeatType {
+  DAILY
+  WEEKLY
+  CUSTOM
 }
