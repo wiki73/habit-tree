@@ -12,29 +12,43 @@ function buildDateAtUtc(date: string) {
   return new Date(`${date}T00:00:00.000Z`);
 }
 
-function isHabitActiveOnDay(habit: { plans: { startDate: Date; endDate?: Date | null }[] }, dateString: string) {
+function isHabitActiveOnDay(
+  habit: { plans: { startDate: Date; endDate?: Date | null }[] },
+  dateString: string,
+) {
   if (!habit.plans?.length) return true;
 
   const currentDate = buildDateAtUtc(dateString);
 
   return habit.plans.some((plan) => {
     const planStart = buildDateAtUtc(toDateOnlyString(plan.startDate));
-    const planEnd = plan.endDate ? buildDateAtUtc(toDateOnlyString(plan.endDate)) : null;
-    return currentDate >= planStart && (planEnd === null || currentDate <= planEnd);
+    const planEnd = plan.endDate
+      ? buildDateAtUtc(toDateOnlyString(plan.endDate))
+      : null;
+    return (
+      currentDate >= planStart && (planEnd === null || currentDate <= planEnd)
+    );
   });
 }
 
 function getPlanLabel(habit: { plans: { durationDays?: number | null }[] }) {
   const plan = habit.plans?.[0];
   if (!plan) return "∞";
-  if (plan.durationDays && plan.durationDays > 0) return `${plan.durationDays}d`;
+  if (plan.durationDays && plan.durationDays > 0)
+    return `${plan.durationDays}d`;
   return "∞";
 }
 
-function buildRecentDayStrings(daysCount: number) {
-   return Array.from({ length: daysCount }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
+function buildCurrentMonthDayStrings() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const start = new Date(Date.UTC(year, month, 1));
+  const end = new Date(Date.UTC(year, month + 1, 0));
+  const daysCount = end.getUTCDate();
+
+  return Array.from({ length: daysCount }).map((_, i) => {
+    const d = new Date(Date.UTC(year, month, 1 + i));
     return d.toISOString().slice(0, 10);
   });
 }
@@ -74,7 +88,11 @@ export async function toggleHabitInDay(habitSlug: string, dateStr: string) {
   revalidatePath("/");
 }
 
-export async function createHabit(title: string, slug: string, durationDaysParam: string) {
+export async function createHabit(
+  title: string,
+  slug: string,
+  durationDaysParam: string,
+) {
   if (!title.trim() || !slug.trim()) return;
 
   const existing = await db.habit.findUnique({ where: { slug } });
@@ -82,9 +100,14 @@ export async function createHabit(title: string, slug: string, durationDaysParam
 
   const durationDays = Number(durationDaysParam) || 0;
   const today = buildDateAtUtc(new Date().toISOString().slice(0, 10));
-  const endDate = durationDays > 0
-    ? buildDateAtUtc(new Date(today.getTime() + (durationDays - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
-    : null;
+  const endDate =
+    durationDays > 0
+      ? buildDateAtUtc(
+          new Date(today.getTime() + (durationDays - 1) * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10),
+        )
+      : null;
 
   await db.habit.create({
     data: {
@@ -107,7 +130,7 @@ export async function createHabit(title: string, slug: string, durationDaysParam
 }
 
 export async function getFactoryGrid30Days() {
-  const days = buildRecentDayStrings(30);
+  const days = buildCurrentMonthDayStrings();
   await ensureDaysExist(days);
 
   const allHabits = await db.habit.findMany({ include: { plans: true } });
@@ -116,14 +139,16 @@ export async function getFactoryGrid30Days() {
     include: { habit: true, day: true },
   });
 
-  const taskMap = new Map<string, typeof allTasks[number]>();
+  const taskMap = new Map<string, (typeof allTasks)[number]>();
   allTasks.forEach((task) => {
     const dateKey = toDateOnlyString(task.day.date);
     taskMap.set(`${dateKey}:${task.habitId}`, task);
   });
 
   return days.map((dateStr) => {
-    const activeHabits = allHabits.filter((habit) => isHabitActiveOnDay(habit, dateStr));
+    const activeHabits = allHabits.filter((habit) =>
+      isHabitActiveOnDay(habit, dateStr),
+    );
 
     const habitsState = activeHabits.map((habit) => {
       const task = taskMap.get(`${dateStr}:${habit.id}`);
@@ -143,8 +168,8 @@ export async function getFactoryGrid30Days() {
   });
 }
 
-export async function getOverviewStats(daysCount = 30) {
-  const days = buildRecentDayStrings(daysCount);
+export async function getOverviewStats() {
+  const days = buildCurrentMonthDayStrings();
   const allHabits = await db.habit.findMany({ include: { plans: true } });
   const allTasks = await db.dayTask.findMany({
     where: { day: { date: { in: days.map(buildDateAtUtc) } } },
@@ -153,11 +178,15 @@ export async function getOverviewStats(daysCount = 30) {
 
   const completedTasks = allTasks.length;
 
-  const activeHabitsByDay = days.map((date) =>
-    allHabits.filter((habit) => isHabitActiveOnDay(habit, date)).length,
+  const activeHabitsByDay = days.map(
+    (date) =>
+      allHabits.filter((habit) => isHabitActiveOnDay(habit, date)).length,
   );
 
-  const totalPossibleTasks = activeHabitsByDay.reduce((sum, count) => sum + count, 0);
+  const totalPossibleTasks = activeHabitsByDay.reduce(
+    (sum, count) => sum + count,
+    0,
+  );
   const activeDays = activeHabitsByDay.filter((count) => count > 0).length;
 
   const habits = allHabits.map((habit) => ({
@@ -168,12 +197,14 @@ export async function getOverviewStats(daysCount = 30) {
   }));
 
   return {
-    totalDays: daysCount,
+    totalDays: days.length,
     totalHabits: allHabits.length,
     activeDays,
     totalPossibleTasks,
     completedTasks,
-    completionRate: totalPossibleTasks ? Math.round((completedTasks / totalPossibleTasks) * 100) : 0,
+    completionRate: totalPossibleTasks
+      ? Math.round((completedTasks / totalPossibleTasks) * 100)
+      : 0,
     habits,
   };
 }
